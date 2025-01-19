@@ -2,7 +2,6 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QListWidget, QListWidgetItem, QComboBox, QSpacerItem, QSizePolicy, QInputDialog, QMessageBox, QDialog, QLineEdit, QTextEdit, QFormLayout, QTableWidget, QTableWidgetItem
 )
-from PyQt6.QtCore import QTimer
 import sys
 import sqlite3
 
@@ -62,22 +61,11 @@ class TaskLoggerHome(QMainWindow):
         # Load tasks from database
         self.load_tasks()
 
-        # Bottom live timer (placeholder)
-        self.live_timer_label = QLabel("Active Task: None")
-        main_layout.addWidget(self.live_timer_label)
-
         # Connect signals to slots
         self.add_task_button.clicked.connect(self.open_add_task_dialog)
         self.statistics_button.clicked.connect(self.view_statistics)
         self.delete_task_button.clicked.connect(self.delete_selected_task)
         self.filter_combo_box.currentIndexChanged.connect(self.apply_filter)
-        self.task_list.itemClicked.connect(self.start_stop_task)
-
-        # Timer for active task tracking
-        self.active_task = None
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_timer)
-        self.elapsed_seconds = 0
 
     def setup_database(self):
         """Create the database table if it doesn't exist."""
@@ -87,7 +75,7 @@ class TaskLoggerHome(QMainWindow):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 description TEXT,
-                time INTEGER,
+                time_spent INTEGER,
                 category TEXT
             )
             """
@@ -97,7 +85,7 @@ class TaskLoggerHome(QMainWindow):
     def load_tasks(self):
         """Load tasks from the database into the task list."""
         self.task_list.clear()
-        self.cursor.execute("SELECT id, name, time, category FROM tasks")
+        self.cursor.execute("SELECT id, name, time_spent, category FROM tasks")
         tasks = self.cursor.fetchall()
         for task in tasks:
             item = QListWidgetItem(f"{task[1]} - {task[2]} mins ({task[3]})")
@@ -108,18 +96,18 @@ class TaskLoggerHome(QMainWindow):
         """Open a dialog to add detailed task information."""
         dialog = AddTaskDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            task_name, task_description, estimated_time, category = dialog.get_task_details()
+            task_name, task_description, time_spent, category = dialog.get_task_details()
             if task_name:
                 self.cursor.execute(
-                    "INSERT INTO tasks (name, description, time, category) VALUES (?, ?, ?, ?)",
-                    (task_name, task_description, int(estimated_time), category)
+                    "INSERT INTO tasks (name, description, time_spent, category) VALUES (?, ?, ?, ?)",
+                    (task_name, task_description, int(time_spent), category)
                 )
                 self.conn.commit()
                 self.load_tasks()
 
     def view_statistics(self):
         """Open the statistics dialog."""
-        dialog = StatisticsDialog(self.conn, self)
+        dialog = StatisticsDialog(self)
         dialog.exec()
 
     def delete_selected_task(self):
@@ -135,46 +123,18 @@ class TaskLoggerHome(QMainWindow):
                 self.cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
                 self.conn.commit()
                 self.load_tasks()
-                if self.active_task == selected_item:
-                    self.timer.stop()
-                    self.live_timer_label.setText("Active Task: None")
-                    self.active_task = None
         else:
             QMessageBox.warning(self, "No Task Selected", "Please select a task to delete.")
-
-    def start_stop_task(self, item):
-        """Start or stop timing for the selected task."""
-        if self.active_task is None:
-            # Start timing
-            self.active_task = item
-            self.live_timer_label.setText(f"Active Task: {item.text()}")
-            self.elapsed_seconds = 0
-            self.timer.start(1000)  # Update every second
-        elif self.active_task == item:
-            # Stop timing
-            self.timer.stop()
-            self.live_timer_label.setText("Active Task: None")
-            print(f"Task '{item.text()}' tracked for {self.elapsed_seconds} seconds.")
-            self.active_task = None
-
-    def update_timer(self):
-        """Update the timer for the active task."""
-        self.elapsed_seconds += 1
-        self.live_timer_label.setText(f"Active Task: {self.active_task.text()} - {self.elapsed_seconds} seconds")
 
     def apply_filter(self):
         """Apply the selected filter to the task list."""
         filter_option = self.filter_combo_box.currentText()
         if filter_option == "All":
             self.load_tasks()
-        elif filter_option == "Today":
-            self.load_tasks()  # Placeholder for date-based filtering
-        elif filter_option == "This Week":
-            self.load_tasks()  # Placeholder for week-based filtering
         elif filter_option == "Category":
             category, ok = QInputDialog.getText(self, "Filter by Category", "Enter category:")
             if ok:
-                self.cursor.execute("SELECT id, name, time, category FROM tasks WHERE LOWER(category) = ?", (category.lower(),))
+                self.cursor.execute("SELECT id, name, time_spent, category FROM tasks WHERE LOWER(category) = ?", (category.lower(),))
                 tasks = self.cursor.fetchall()
                 self.task_list.clear()
                 for task in tasks:
@@ -193,12 +153,12 @@ class AddTaskDialog(QDialog):
 
         self.task_name_input = QLineEdit()
         self.task_description_input = QTextEdit()
-        self.estimated_time_input = QLineEdit()
+        self.time_spent_input = QLineEdit()
         self.category_input = QLineEdit()
 
         layout.addRow("Task Name:", self.task_name_input)
         layout.addRow("Description:", self.task_description_input)
-        layout.addRow("Estimated Time (mins):", self.estimated_time_input)
+        layout.addRow("Time Spent (mins):", self.time_spent_input)
         layout.addRow("Category:", self.category_input)
 
         # Buttons
@@ -218,25 +178,22 @@ class AddTaskDialog(QDialog):
         """Return task details entered by the user."""
         task_name = self.task_name_input.text()
         task_description = self.task_description_input.toPlainText()
-        estimated_time = self.estimated_time_input.text()
+        time_spent = self.time_spent_input.text()
         category = self.category_input.text()
-        return task_name, task_description, estimated_time, category
+        return task_name, task_description, time_spent, category
 
 class StatisticsDialog(QDialog):
-    def __init__(self, db_connection, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Task Statistics")
         self.setGeometry(200, 200, 600, 400)
-        self.conn = db_connection
 
         # Layout and widgets
         layout = QVBoxLayout()
 
         self.statistics_table = QTableWidget()
         self.statistics_table.setColumnCount(3)
-        self.statistics_table.setHorizontalHeaderLabels(["Category", "Total Time (mins)", "Task Count"])
-
-        self.load_statistics()
+        self.statistics_table.setHorizontalHeaderLabels(["Task Name", "Time Spent (mins)", "Category"])
 
         layout.addWidget(self.statistics_table)
 
@@ -246,24 +203,17 @@ class StatisticsDialog(QDialog):
         layout.addWidget(self.close_button)
 
         self.setLayout(layout)
+        self.load_statistics()
 
     def load_statistics(self):
-        """Load and display statistics from the database."""
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            SELECT category, SUM(time) AS total_time, COUNT(*) AS task_count
-            FROM tasks
-            GROUP BY category
-            """
-        )
-        statistics = cursor.fetchall()
-
-        self.statistics_table.setRowCount(len(statistics))
-        for row_index, (category, total_time, task_count) in enumerate(statistics):
-            self.statistics_table.setItem(row_index, 0, QTableWidgetItem(category))
-            self.statistics_table.setItem(row_index, 1, QTableWidgetItem(str(total_time)))
-            self.statistics_table.setItem(row_index, 2, QTableWidgetItem(str(task_count)))
+        """Load statistics from the database."""
+        self.parent().cursor.execute("SELECT name, time_spent, category FROM tasks")
+        tasks = self.parent().cursor.fetchall()
+        self.statistics_table.setRowCount(len(tasks))
+        for row, task in enumerate(tasks):
+            self.statistics_table.setItem(row, 0, QTableWidgetItem(task[0]))
+            self.statistics_table.setItem(row, 1, QTableWidgetItem(str(task[1])))
+            self.statistics_table.setItem(row, 2, QTableWidgetItem(task[2]))
 
 # Run the application
 if __name__ == "__main__":
