@@ -1,6 +1,6 @@
 import sqlite3
 
-DB_NAME = "daily_logger.db"
+DB_NAME = "tasks.db"
 
 
 def initialize():
@@ -34,7 +34,7 @@ def initialize():
 
               """)
         conn.commit()
-
+     
 
 if __name__ == "__main__":
     initialize()
